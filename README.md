@@ -9,7 +9,7 @@ A lightweight terminal MP3 player built with Python, curses, and VLC. Folders be
 | `↑` / `↓` | Volume up / down |
 | `←` / `→` | Seek -5s / +5s |
 | `n` / `p` | Next / previous song |
-| `,` / `.` | Next / previous playlist |
+| `]` / `[` | Next / previous playlist |
 | `l` | Cycle loop mode (off, song, playlist) |
 | `r` | Toggle shuffle |
 | `q` | Quit |
