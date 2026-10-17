@@ -1,2 +1,3 @@
 python-vlc
 mutagen
+windows-curses; sys_platform == "win32"
