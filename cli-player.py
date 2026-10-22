@@ -244,6 +244,7 @@ class Player:
         self.mp = self.instance.media_player_new()
         self.mp.audio_set_volume(self.volume)
         self.paused = False
+        self.queue = []
         self._load_current(autoplay=False)
 
     @property
@@ -275,6 +276,10 @@ class Player:
         self._load_current(autoplay=True)
 
     def next_song(self, user_initiated=True):
+        if self.queue:
+            self.pl_idx, self.song_idx = self.queue.pop(0)
+            self._load_current(autoplay=True)
+            return
         n = len(self.playlist.songs)
         if self.shuffle:
             if n > 1:
@@ -445,6 +450,10 @@ def draw(stdscr, player: Player, viz: Visualizer, ui: UI, status_msg: str):
     stdscr.addstr(r_bar, 2, draw_bar(max(10, w - 20), frac)[:w - 4], ACC)
     stdscr.addstr(r_time, 2, (f"{fmt_time(cur)} elapsed   {fmt_time(length)} total   "
                               f"-{fmt_time(remaining)} remaining")[:w - 4])
+    if player.queue and not compact:
+        qpl, qsi = player.queue[0]
+        more = f"  +{len(player.queue) - 1} more" if len(player.queue) > 1 else ""
+        stdscr.addstr(9, 2, f"Next up: {player.playlists[qpl].songs[qsi].title}{more}"[:w - 4], ACC)
 
     # song list (scrolling, cursor, search filter)
     songs = player.playlist.songs
@@ -468,7 +477,10 @@ def draw(stdscr, player: Player, viz: Visualizer, ui: UI, status_msg: str):
                 attr = (ACC | curses.A_BOLD) if is_cur else curses.A_NORMAL
                 if k == ui.sel:
                     attr |= curses.A_REVERSE
-                stdscr.addstr(row, 4, f"{marker}{i + 1:>2}. {songs[i].title}"[:w - 6], attr)
+                qn = [n for n, (pi, si) in enumerate(player.queue, 1)
+                      if pi == player.pl_idx and si == i]
+                tag = f"[q{qn[0]}] " if qn else ""
+                stdscr.addstr(row, 4, f"{marker}{i + 1:>2}. {tag}{songs[i].title}"[:w - 6], attr)
                 row += 1
 
     draw_viz(stdscr, viz, viz_top, viz_h, w)
@@ -517,6 +529,7 @@ HELP = [
     ("] / [", "next / previous playlist"),
     ("j / k", "move cursor in song list"),
     ("enter", "play selected song"),
+    ("a", "add selected song to queue"),
     ("/", "search (esc cancels)"),
     ("l", "cycle loop: off / song / playlist"),
     ("r", "toggle shuffle"),
@@ -726,6 +739,11 @@ def main(stdscr, player: Player, viz: Visualizer, ui: UI):
                 player.seek(-5)
             elif ch == curses.KEY_RIGHT:
                 player.seek(+5)
+            elif ch in (ord('a'), ord('A')):
+                vis = visible_songs(player, ui)
+                if vis:
+                    player.queue.append((player.pl_idx, vis[ui.sel]))
+                    status_msg = f"Queued: {len(player.queue)}"
             elif ch in (ord('n'), ord('N')):
                 player.next_song()
             elif ch in (ord('p'), ord('P')):
@@ -783,6 +801,29 @@ def main(stdscr, player: Player, viz: Visualizer, ui: UI):
         time.sleep(0.03)
 
 
+def start_notifier(player):
+    if not shutil.which("notify-send"):
+        return
+
+    def loop():
+        last = player.song.path
+        while True:
+            try:
+                cur = player.song
+                if cur.path != last:
+                    last = cur.path
+                    subprocess.Popen(
+                        ["notify-send", "-a", "cli-player", "-t", "3000",
+                         "Now playing", cur.title],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+            except Exception:
+                pass
+            time.sleep(0.5)
+
+    threading.Thread(target=loop, daemon=True).start()
+
+
 if __name__ == "__main__":
     music_dir = Path(sys.argv[1]).expanduser() if len(sys.argv) > 1 else Path.home() / "Documents" / "music"
     if not music_dir.is_dir():
@@ -800,6 +841,7 @@ if __name__ == "__main__":
     if not isinstance(theme, int) or not 0 <= theme < len(THEMES):
         theme = 0
     player = Player(playlists, state)
+    start_notifier(player)
     ui = UI(theme)
     viz = Visualizer(bars=60)
     try:
