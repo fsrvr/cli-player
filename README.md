@@ -10,6 +10,7 @@ A lightweight terminal music player built with Python, curses, and VLC. Folders 
 - Drag & drop audio files into the terminal to copy or move them into the current playlist
 - 7 color themes (default is mono), visualizer follows the theme
 - Remembers volume, loop, shuffle, theme, and last song between runs
+- Playback speed, synced `.lrc` lyrics, mouse support, play-next queue
 - Optional [cava](https://github.com/karlstav/cava) visualizer (Linux)
 
 ## Installation
@@ -82,7 +83,16 @@ Supported formats: mp3, flac, wav, ogg, m4a, opus, wma.
 | `h` | Show help menu |
 | `l` | Cycle loop mode (off, song, playlist) |
 | `r` | Toggle shuffle |
+| `a` | Add selected song to queue |
+| `x` / `X` | Remove selected song from queue / clear queue |
+| `,` / `.` | Playback speed -0.1x / +0.1x |
 | `q` | Quit |
+
+## Lyrics
+Put a `.lrc` file next to a song with the same name (`song.mp3` + `song.lrc`). The current line shows above the progress bar.
+
+## Mouse
+Click the progress bar to seek, click a song to play it, scroll for volume.
 
 ## Drag & drop
 Drag an audio file from your file manager onto the terminal window. A popup asks copy or move: pick with `↑`/`↓` and `Enter` (`Esc` cancels). Switch playlists with `[` / `]` first to choose the destination. Needs a terminal that pastes the file path on drop (kitty, foot, alacritty, wezterm, etc.).

@@ -19,6 +19,7 @@ import curses
 import json
 import os
 import random
+import re
 import shlex
 import shutil
 import subprocess
@@ -169,10 +170,44 @@ class Visualizer:
 # Data model
 # --------------------------------------------------------------------------
 
+def load_lrc(path):
+    try:
+        text = path.with_suffix(".lrc").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return []
+    out = []
+    for raw in text.splitlines():
+        stamps = re.findall(r"\[(\d+):(\d+(?:\.\d+)?)\]", raw)
+        if not stamps:
+            continue
+        txt = re.sub(r"\[[^\]]*\]", "", raw).strip()
+        for m, sec in stamps:
+            out.append((int((int(m) * 60 + float(sec)) * 1000), txt))
+    out.sort()
+    return out
+
+
+def current_lyric(song, cur):
+    line = ""
+    for t, txt in song.lyrics:
+        if t <= cur:
+            line = txt
+        else:
+            break
+    return line
+
+
 class Song:
     def __init__(self, path: Path):
         self.path = path
         self.title = self._read_title()
+        self._lyrics = None
+
+    @property
+    def lyrics(self):
+        if self._lyrics is None:
+            self._lyrics = load_lrc(self.path)
+        return self._lyrics
 
     def _read_title(self) -> str:
         if HAVE_MUTAGEN:
@@ -245,6 +280,9 @@ class Player:
         self.mp.audio_set_volume(self.volume)
         self.paused = False
         self.queue = []
+        self.rate = 1.0
+        self._rate_dirty = False
+        self._rate_t = 0.0
         self._load_current(autoplay=False)
 
     @property
@@ -258,8 +296,10 @@ class Player:
     def _load_current(self, autoplay=True):
         media = self.instance.media_new(str(self.song.path))
         self.mp.set_media(media)
+        self.mp.set_rate(self.rate)
         if autoplay:
             self.mp.play()
+            self.mp.set_rate(self.rate)
             self.paused = False
 
     def play_pause(self):
@@ -331,6 +371,16 @@ class Player:
         self.volume = max(0, min(100, self.volume + delta))
         self.mp.audio_set_volume(self.volume)
 
+    def change_speed(self, delta):
+        self.rate = max(0.5, min(2.0, round(self.rate + delta, 2)))
+        self._rate_t = time.time()
+        self._rate_dirty = True
+
+    def apply_rate(self):
+        if self._rate_dirty and time.time() - self._rate_t > 0.15:
+            self._rate_dirty = False
+            self.mp.set_rate(self.rate)
+
     def cycle_loop(self):
         i = LOOP_MODES.index(self.loop_mode)
         self.loop_mode = LOOP_MODES[(i + 1) % len(LOOP_MODES)]
@@ -361,6 +411,8 @@ class UI:
         self.pending = []
         self.pick = 0
         self.last_key = None
+        self.bar = None
+        self.rows = {}
 
 
 def visible_songs(player, ui):
@@ -432,6 +484,9 @@ def draw(stdscr, player: Player, viz: Visualizer, ui: UI, status_msg: str):
     title = " CLI MP3 PLAYER "
     stdscr.addstr(0, max(0, (w - len(title)) // 2), title, curses.A_REVERSE | ACC)
     stdscr.addstr(0, max(0, w - 12), "by fsrvr", curses.A_DIM)
+    if not compact:
+        sub = '"choose peace"'
+        stdscr.addstr(1, max(0, (w - len(sub)) // 2), sub, ui.faint)
     tx = (w - len(title)) // 2
     for link in ("github.com/fsrvr/cli-player", "fsrvr/cli-player"):
         if 2 + len(link) < tx:
@@ -445,9 +500,14 @@ def draw(stdscr, player: Player, viz: Visualizer, ui: UI, status_msg: str):
     status = "PLAYING" if playing else "PAUSED"
     stdscr.addstr(r_stat, 2, (f"Status: {status}   Loop: {player.loop_mode}   "
                               f"Shuffle: {'on' if player.shuffle else 'off'}   "
-                              f"Vol: {player.volume}%")[:w - 4])
+                              f"Vol: {player.volume}%   Speed: {player.rate:.1f}x")[:w - 4])
     frac = (cur / length) if length else 0
     stdscr.addstr(r_bar, 2, draw_bar(max(10, w - 20), frac)[:w - 4], ACC)
+    ui.bar = (r_bar, 2, min(max(10, w - 20), w - 4))
+    if not compact:
+        lyr = current_lyric(player.song, cur)
+        if lyr:
+            stdscr.addstr(6, 2, lyr[:w - 4], ACC)
     stdscr.addstr(r_time, 2, (f"{fmt_time(cur)} elapsed   {fmt_time(length)} total   "
                               f"-{fmt_time(remaining)} remaining")[:w - 4])
     if player.queue and not compact:
@@ -459,6 +519,7 @@ def draw(stdscr, player: Player, viz: Visualizer, ui: UI, status_msg: str):
     songs = player.playlist.songs
     vis = visible_songs(player, ui)
     ui.sel = max(0, min(ui.sel, len(vis) - 1)) if vis else 0
+    ui.rows = {}
     row = r_list
     if not compact:
         header = f"Matches ({len(vis)}):" if ui.query else "Songs:"
@@ -480,6 +541,7 @@ def draw(stdscr, player: Player, viz: Visualizer, ui: UI, status_msg: str):
                 qn = [n for n, (pi, si) in enumerate(player.queue, 1)
                       if pi == player.pl_idx and si == i]
                 tag = f"[q{qn[0]}] " if qn else ""
+                ui.rows[row] = k
                 stdscr.addstr(row, 4, f"{marker}{i + 1:>2}. {tag}{songs[i].title}"[:w - 6], attr)
                 row += 1
 
@@ -530,6 +592,10 @@ HELP = [
     ("j / k", "move cursor in song list"),
     ("enter", "play selected song"),
     ("a", "add selected song to queue"),
+    ("x / X", "remove from queue / clear queue"),
+    (", / .", "speed -0.1x / +0.1x"),
+    ("click", "bar: seek, song: play"),
+    ("scroll", "volume up / down"),
     ("/", "search (esc cancels)"),
     ("l", "cycle loop: off / song / playlist"),
     ("r", "toggle shuffle"),
@@ -659,6 +725,15 @@ def main(stdscr, player: Player, viz: Visualizer, ui: UI):
     stdscr.keypad(True)
     curses.use_default_colors()
     apply_theme(ui.theme)
+    curses.mousemask(curses.ALL_MOUSE_EVENTS)
+    curses.mouseinterval(0)
+    ui.faint = curses.A_DIM
+    try:
+        if curses.COLORS >= 256:
+            curses.init_pair(2, 236, -1)
+            ui.faint = curses.color_pair(2)
+    except curses.error:
+        pass
 
     player.mp.play()
     status_msg = "" if viz.available else "cava not found: sudo pacman -S cava"
@@ -729,6 +804,38 @@ def main(stdscr, player: Player, viz: Visualizer, ui: UI):
                     ui.sel = 0
             elif ch in (ord('q'), ord('Q')):
                 break
+            elif ch == curses.KEY_MOUSE:
+                try:
+                    _, mx, my, _, bs = curses.getmouse()
+                except curses.error:
+                    bs = mx = my = 0
+                if bs & (curses.BUTTON1_PRESSED | curses.BUTTON1_CLICKED):
+                    b = ui.bar
+                    if b and my == b[0] and b[1] <= mx < b[1] + b[2]:
+                        length = player.mp.get_length()
+                        if length > 0:
+                            player.mp.set_time(int(length * (mx - b[1]) / b[2]))
+                    elif my in ui.rows:
+                        ui.sel = ui.rows[my]
+                        play_selected(player, ui)
+                elif bs & curses.BUTTON4_PRESSED:
+                    player.change_volume(+5)
+                elif bs & getattr(curses, "BUTTON5_PRESSED", 0):
+                    player.change_volume(-5)
+            elif ch == ord('x'):
+                vis = visible_songs(player, ui)
+                if vis and (player.pl_idx, vis[ui.sel]) in player.queue:
+                    player.queue.remove((player.pl_idx, vis[ui.sel]))
+                    status_msg = f"Removed from queue: {len(player.queue)} left"
+            elif ch == ord('X'):
+                player.queue.clear()
+                status_msg = "Queue cleared"
+            elif ch == ord(','):
+                player.change_speed(-0.1)
+                status_msg = f"Speed: {player.rate:.1f}x"
+            elif ch == ord('.'):
+                player.change_speed(+0.1)
+                status_msg = f"Speed: {player.rate:.1f}x"
             elif ch == ord(' '):
                 player.play_pause()
             elif ch == curses.KEY_UP:
@@ -793,6 +900,7 @@ def main(stdscr, player: Player, viz: Visualizer, ui: UI):
             msg_time = now
         if status_msg and now - msg_time > 3:
             status_msg = msg_seen = ""
+        player.apply_rate()
         if now - last_tick > 0.4:
             player.tick()
             last_tick = now
