@@ -955,6 +955,41 @@ def main(stdscr, player: Player, viz: Visualizer, ui: UI):
     except curses.error:
         pass
 
+    if getattr(ui, "first_run", False):
+        stdscr.nodelay(False)
+        opts = [("aud", "New GUI", "Audacious-style window with buttons and durations"),
+                ("legacy", "Legacy GUI", "the original layout with the big visualizer")]
+        pick = 0
+        while True:
+            stdscr.erase()
+            h, w = stdscr.getmaxyx()
+            lines = [(" Choose your GUI ", curses.A_REVERSE | ACC),
+                     ("(press g anytime to switch)", curses.A_DIM), ("", 0)]
+            for k, (_, name, desc) in enumerate(opts):
+                lines.append((f"{'>' if k == pick else ' '} {k + 1}. {name} - {desc}",
+                              (curses.A_REVERSE | ACC) if k == pick else 0))
+            lines += [("", 0), ("up/down + enter, or press 1 / 2", curses.A_DIM)]
+            for n, (t, a) in enumerate(lines):
+                y = h // 2 - len(lines) // 2 + n
+                x = max(0, (w - len(t)) // 2)
+                if 0 <= y < h:
+                    try:
+                        stdscr.addstr(y, x, t[:max(0, w - x - 1)], a)
+                    except curses.error:
+                        pass
+            stdscr.refresh()
+            c = stdscr.getch()
+            if c in (curses.KEY_UP, curses.KEY_DOWN, ord('j'), ord('k'), 9):
+                pick = 1 - pick
+            elif c in (ord('1'), ord('2')):
+                pick = c - ord('1')
+                break
+            elif is_enter(c) or c == 27:
+                break
+        ui.gui = opts[pick][0]
+        ui.first_run = False
+        stdscr.nodelay(True)
+
     player.mp.play()
     status_msg = "" if viz.available else "cava not found: sudo pacman -S cava"
     last_tick = time.time()
@@ -1223,7 +1258,8 @@ if __name__ == "__main__":
     player = Player(playlists, state)
     start_notifier(player)
     ui = UI(theme)
-    ui.gui = state.get("gui") if state.get("gui") in ("aud", "legacy") else "aud"
+    ui.first_run = state.get("gui") not in ("aud", "legacy")
+    ui.gui = state.get("gui") if not ui.first_run else "aud"
     viz = Visualizer(bars=60)
     try:
         curses.wrapper(main, player, viz, ui)
