@@ -14,8 +14,9 @@ A lightweight terminal music player built with Python, curses, and VLC. Folders 
 - Optional [cava](https://github.com/karlstav/cava) visualizer (Linux)
 
 ## Quick install
+Download the project folder, open a terminal inside it, then run:
 
-    git clone https://github.com/fsrvr/cli-player && cd cli-player && ./install.sh
+    sh install.sh
 
 It asks for your OS/distro (arch, debian, ubuntu, mint, fedora, opensuse, void, alpine, macos, freebsd, windows), installs everything, and adds a cli-player command. Windows users: the script prints the PowerShell steps.
 
