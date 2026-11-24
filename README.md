@@ -13,6 +13,12 @@ A lightweight terminal music player built with Python, curses, and VLC. Folders 
 - Playback speed, synced `.lrc` lyrics, mouse support, play-next queue
 - Optional [cava](https://github.com/karlstav/cava) visualizer (Linux)
 
+## Quick install
+
+    git clone https://github.com/fsrvr/cli-player && cd cli-player && ./install.sh
+
+It asks for your OS/distro (arch, debian, ubuntu, mint, fedora, opensuse, void, alpine, macos, freebsd, windows), installs everything, and adds a cli-player command. Windows users: the script prints the PowerShell steps.
+
 ## Installation
 Works on Arch, Debian/Ubuntu, Fedora, macOS, and Windows. VLC is required. cava is optional.
 
