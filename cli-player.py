@@ -1196,6 +1196,8 @@ def main(stdscr, player: Player, viz: Visualizer, ui: UI):
             if done:
                 if job.result:
                     add_song(player, ui.job_dest, job.result)
+                if not job.result:
+                    ui.err = (job.msg, time.time() + 10)
                 ui.job = None
 
         now = time.time()
@@ -1209,7 +1211,15 @@ def main(stdscr, player: Player, viz: Visualizer, ui: UI):
             player.tick()
             last_tick = now
 
-        shown = f"{ui.prompt['label']}{ui.prompt['text']}_" if ui.prompt else status_msg
+        err = getattr(ui, "err", None)
+        if ui.prompt:
+            shown = f"{ui.prompt['label']}{ui.prompt['text']}_"
+        elif ui.job and not ui.job.done:
+            shown = "⇩ " + ui.job.msg
+        elif err and time.time() < err[1]:
+            shown = err[0]
+        else:
+            shown = status_msg
         draw_safe(stdscr, player, viz, ui, shown)
         time.sleep(0.03)
 

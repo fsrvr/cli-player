@@ -47,17 +47,35 @@ class Job:
         t = self.target
         if not re.match(r"https?://", t):
             t = f"ytsearch1:{t}"
+        self.msg = "Searching..." if t.startswith("ytsearch") else "Starting..."
         cmd = ["yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "0",
                "--embed-thumbnail", "--embed-metadata", "--convert-thumbnails", "jpg",
-               "--no-playlist", "--no-simulate",
+               "--no-playlist", "--no-simulate", "--no-quiet", "--newline", "--progress",
                "-o", str(self.dest / "%(title)s.%(ext)s"),
-               "--print", "after_move:%(filepath)s\t%(artist,uploader)s\t%(track,title)s\t%(duration)s", t]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        out = r.stdout.strip().splitlines()
-        if r.returncode != 0 or not out:
-            err = r.stderr.strip().splitlines()
-            raise RuntimeError((err[-1] if err else "yt-dlp error")[:80])
-        fp, artist, title, dur = out[-1].split("\t")
+               "--print", "after_move:CPDONE\t%(filepath)s\t%(artist,uploader)s\t%(track,title)s\t%(duration)s", t]
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        name, done, err = "", None, ""
+        for line in p.stdout:
+            line = line.strip()
+            if line.startswith("CPDONE\t"):
+                done = line.split("\t")[1:]
+            elif line.startswith("ERROR"):
+                err = line
+            elif line.startswith("[download] Destination:"):
+                name = Path(line.split(":", 1)[1].strip()).name
+                self.msg = f"Downloading {name}"
+            elif line.startswith("[download]") and "%" in line:
+                m = re.search(r"([\d.]+)%", line)
+                if m:
+                    self.msg = f"Downloading {name} {m.group(1)}%"
+            elif line.startswith("[ExtractAudio]"):
+                self.msg = f"Converting to mp3: {name}"
+            elif line.startswith(("[EmbedThumbnail]", "[Metadata]", "[ThumbnailsConvertor]")):
+                self.msg = f"Adding cover/tags: {name}"
+        p.wait()
+        if p.returncode != 0 or not done:
+            raise RuntimeError(err.replace("ERROR: ", "")[:100] or f"yt-dlp exited with code {p.returncode}")
+        fp, artist, title, dur = done
         artist = "" if artist == "NA" else re.sub(r"\s*-\s*Topic$", "", artist)
         title = re.sub(r"\s*[\(\[].*?[\)\]]", "", title).strip()
         if " - " in title:
